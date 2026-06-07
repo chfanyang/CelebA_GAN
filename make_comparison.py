@@ -29,7 +29,7 @@ def parse_args():
         description="Generate L1 vs GAN comparison figures"
     )
     parser.add_argument("--dataset", type=str, required=True,
-                        choices=["fashion_mnist", "cifar10", "places2"])
+                        choices=["celeba", "fashion_mnist", "cifar10", "places2"])
     parser.add_argument("--l1_checkpoint", type=str, required=True)
     parser.add_argument("--gan_checkpoint", type=str, required=True)
     parser.add_argument("--data_root", type=str, default="./data")
@@ -64,9 +64,9 @@ def main():
 
     # Defaults
     if args.image_size is None:
-        args.image_size = 128 if args.dataset == "places2" else 32
+        args.image_size = 128 if args.dataset in ("celeba", "places2") else 32
     if args.mask_size is None:
-        default_masks = {32: 14, 64: 28, 128: 56}
+        default_masks = {32: 14, 64: 24, 128: 48}
         args.mask_size = default_masks.get(args.image_size, args.image_size // 2)
 
     image_channels = 1 if args.dataset == "fashion_mnist" else 3

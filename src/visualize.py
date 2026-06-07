@@ -99,8 +99,12 @@ def plot_loss_curve(csv_path: str, save_path: str):
 
     # Loss plot
     ax = axes[0]
+    # Keys that are metrics (not losses) — exclude from loss plot
+    metric_keys = {"epoch", "full_l1", "full_mse", "full_psnr",
+                   "hole_l1", "hole_mse", "hole_psnr",
+                   "l1", "mse", "psnr"}
     for key in rows[0].keys():
-        if key not in ("epoch", "l1", "mse", "psnr"):
+        if key not in metric_keys:
             vals = [float(r[key]) for r in rows]
             ax.plot(epochs, vals, label=key)
     ax.set_xlabel("Epoch")
@@ -111,7 +115,8 @@ def plot_loss_curve(csv_path: str, save_path: str):
 
     # Metrics plot
     ax = axes[1]
-    for key in ["l1", "mse", "psnr"]:
+    for key in ["full_l1", "full_mse", "full_psnr",
+                "hole_l1", "hole_mse", "hole_psnr"]:
         if key in rows[0]:
             vals = [float(r[key]) for r in rows]
             ax.plot(epochs, vals, label=key.upper())

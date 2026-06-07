@@ -125,7 +125,9 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     """PatchGAN Critic for WGAN-GP.
 
-    Input: an image (original or completed).
+    Input: concatenation of [image, mask] along channel dim.
+    The mask conditions the critic on the inpainting region.
+
     Output: patch-level critic scores (real-valued, no Sigmoid).
 
     NO normalization layers (BatchNorm/InstanceNorm break the
@@ -134,9 +136,9 @@ class Discriminator(nn.Module):
     Number of layers auto-adjusts to match the Generator depth.
     """
 
-    def __init__(self, image_channels: int = 3, image_size: int = 32):
+    def __init__(self, input_channels: int = 4, image_size: int = 32):
         super().__init__()
-        self.image_channels = image_channels
+        self.input_channels = input_channels
         self.image_size = image_size
 
         num_layers = int(math.log2(image_size)) - 2
@@ -145,7 +147,7 @@ class Discriminator(nn.Module):
         ch_list = [min(base_ch * (2 ** i), 512) for i in range(num_layers)]
 
         layers = []
-        in_ch = image_channels
+        in_ch = input_channels
         for out_ch in ch_list:
             layers.append(
                 nn.Conv2d(in_ch, out_ch, kernel_size=4, stride=2, padding=1)
@@ -164,7 +166,7 @@ class Discriminator(nn.Module):
         """Forward pass.
 
         Args:
-            image: [B, C, H, W] input image
+            image: [B, input_channels, H, W] input (image concat with mask)
 
         Returns:
             scores: [B, 1, h', w'] per-patch critic scores (unbounded real values)

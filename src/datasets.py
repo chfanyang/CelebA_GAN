@@ -1,12 +1,13 @@
-"""Dataset loading for Fashion-MNIST, CIFAR-10, and Places2 subset."""
+"""Dataset loading for CelebA, Fashion-MNIST, CIFAR-10, and Places2 subset."""
 
 import glob
 import os
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import torchvision.datasets as tv_datasets
 import torchvision.transforms as transforms
 
@@ -89,6 +90,59 @@ def get_cifar10(root: str, image_size: int = 32,
     return dataset
 
 
+def get_celeba(root: str, image_size: int = 128,
+                train: bool = True, max_samples: int = None):
+    """Get CelebA dataset for face image inpainting.
+
+    Uses torchvision.datasets.CelebA with automatic download.
+    Falls back with a clear message if download fails.
+
+    Preprocessing: CenterCrop → Resize → ToTensor → Normalize to [-1, 1].
+
+    Args:
+        root: data root directory
+        image_size: target image size (default 128)
+        train: True for training set, False for validation/test
+        max_samples: if set, limit to this many samples
+
+    Returns:
+        torch.utils.data.Dataset
+    """
+    split = "train" if train else "valid"
+
+    transform = transforms.Compose([
+        transforms.CenterCrop(128),  # CelebA images are 178×218; crop to square first
+        transforms.Resize(image_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                             std=[0.5, 0.5, 0.5]),
+    ])
+
+    try:
+        dataset = tv_datasets.CelebA(
+            root=root, split=split, target_type=[],
+            transform=transform, download=True,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load CelebA dataset from {root}.\n"
+            f"Error: {e}\n\n"
+            f"CelebA automatic download may fail due to Google Drive quota limits.\n"
+            f"Please manually download CelebA:\n"
+            f"  1. Download img_align_celeba.zip from the official source\n"
+            f"  2. Extract to {root}/celeba/img_align_celeba/\n"
+            f"  3. Download list_eval_partition.txt and identity_CelebA.txt\n"
+            f"  4. Place them in {root}/celeba/\n"
+            f"Or visit: https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html\n"
+        )
+
+    if max_samples is not None and max_samples > 0 and len(dataset) > max_samples:
+        indices = list(range(max_samples))
+        dataset = Subset(dataset, indices)
+
+    return dataset
+
+
 def get_places2(root: str, image_size: int = 128,
                 max_samples: int = None, train: bool = True):
     """Get Places2 local subset dataset.
@@ -109,18 +163,20 @@ def get_dataloader(name: str, root: str, image_size: int,
     """Factory function to get a DataLoader for a dataset.
 
     Args:
-        name: "fashion_mnist", "cifar10", or "places2"
+        name: "celeba", "fashion_mnist", "cifar10", or "places2"
         root: data root directory
         image_size: target image size
         batch_size: batch size
         train: True for training set, False for test set
-        max_samples: max samples for Places2 (ignored for others)
+        max_samples: max samples (for Places2/CelebA)
         num_workers: number of data loading workers
 
     Returns:
         torch.utils.data.DataLoader
     """
-    if name == "fashion_mnist":
+    if name == "celeba":
+        dataset = get_celeba(root, image_size, train, max_samples)
+    elif name == "fashion_mnist":
         dataset = get_fashion_mnist(root, image_size, train)
     elif name == "cifar10":
         dataset = get_cifar10(root, image_size, train)
@@ -140,7 +196,7 @@ def get_dataloader(name: str, root: str, image_size: int,
             dataset = torch.utils.data.Subset(dataset, indices)
     else:
         raise ValueError(f"Unknown dataset: {name}. "
-                         f"Expected 'fashion_mnist', 'cifar10', or 'places2'.")
+                         f"Expected 'celeba', 'fashion_mnist', 'cifar10', or 'places2'.")
 
     shuffle = train
     dataloader = DataLoader(

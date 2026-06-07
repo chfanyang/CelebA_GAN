@@ -26,6 +26,7 @@ logs/
 data/FashionMNIST/
 data/cifar-10-batches-py
 data/places2_subset/
+data/celeba
 
 # ============================================================================
 # Claude / IDE

@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 """Train image inpainting models with L1 or L1+GAN loss.
 
+Main experiment: CelebA face image inpainting.
+
 Usage:
+    # CelebA L1 baseline (main experiment)
+    python train.py --dataset celeba --mode l1 --mask_type center \\
+        --epochs 20 --batch_size 16 --image_size 128 \\
+        --data_root ./data --max_samples 20000
+
+    # CelebA GAN (main experiment)
+    python train.py --dataset celeba --mode gan --mask_type center \\
+        --epochs 40 --batch_size 16 --image_size 128 \\
+        --lambda_l1 100 --data_root ./data --max_samples 20000
+
+    # CelebA GAN (lower memory: 64x64)
+    python train.py --dataset celeba --mode gan --mask_type center \\
+        --epochs 40 --batch_size 32 --image_size 64 \\
+        --lambda_l1 100 --data_root ./data --max_samples 20000
+
     # Fashion-MNIST L1 baseline
     python train.py --dataset fashion_mnist --mode l1 --mask_type center \\
         --epochs 20 --batch_size 128 --image_size 32
 
-    # Fashion-MNIST GAN
-    python train.py --dataset fashion_mnist --mode gan --mask_type center \\
-        --epochs 30 --batch_size 128 --image_size 32 --lambda_l1 100
-
-    # CIFAR-10 L1
-    python train.py --dataset cifar10 --mode l1 --mask_type center \\
-        --epochs 30 --batch_size 128 --image_size 32
-
     # CIFAR-10 GAN
     python train.py --dataset cifar10 --mode gan --mask_type center \\
         --epochs 50 --batch_size 128 --image_size 32 --lambda_l1 100
-
-    # Places2 L1 (128x128)
-    python train.py --dataset places2 --mode l1 --mask_type center \\
-        --epochs 20 --batch_size 16 --image_size 128 \\
-        --data_root ./data/places2_subset --max_samples 5000
-
-    # Places2 GAN (128x128)
-    python train.py --dataset places2 --mode gan --mask_type center \\
-        --epochs 40 --batch_size 16 --image_size 128 \\
-        --data_root ./data/places2_subset --max_samples 5000 --lambda_l1 100
 """
 
 import argparse
@@ -45,7 +44,7 @@ def parse_args():
     )
     # Dataset
     parser.add_argument("--dataset", type=str, required=True,
-                        choices=["fashion_mnist", "cifar10", "places2"],
+                        choices=["celeba", "fashion_mnist", "cifar10", "places2"],
                         help="Dataset name")
     parser.add_argument("--data_root", type=str, default="./data",
                         help="Root directory for datasets")
@@ -97,14 +96,16 @@ def auto_defaults(args):
     """Set default values based on dataset and mode where not specified."""
     # Image size defaults
     if args.image_size is None:
-        if args.dataset == "places2":
+        if args.dataset in ("celeba", "places2"):
             args.image_size = 128
         else:
             args.image_size = 32
 
     # Batch size defaults
     if args.batch_size is None:
-        if args.dataset == "places2":
+        if args.dataset == "celeba":
+            args.batch_size = 16 if args.image_size >= 128 else 32
+        elif args.dataset == "places2":
             args.batch_size = 16 if args.image_size >= 128 else 32
         else:
             args.batch_size = 128
@@ -112,6 +113,8 @@ def auto_defaults(args):
     # Epochs defaults
     if args.epochs is None:
         defaults = {
+            ("celeba", "l1"): 20,
+            ("celeba", "gan"): 40,
             ("fashion_mnist", "l1"): 20,
             ("fashion_mnist", "gan"): 30,
             ("cifar10", "l1"): 30,
@@ -185,8 +188,9 @@ def main():
     print(f"[INFO] Generator: {sum(p.numel() for p in generator.parameters()):,} params")
 
     if args.mode == "gan":
+        # Discriminator input: image + mask channel (mask-conditioned)
         discriminator = Discriminator(
-            image_channels=image_channels,
+            input_channels=image_channels + 1,
             image_size=args.image_size,
         )
         print(f"[INFO] Discriminator: {sum(p.numel() for p in discriminator.parameters()):,} params")

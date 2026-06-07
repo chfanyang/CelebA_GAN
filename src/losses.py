@@ -4,11 +4,33 @@ Wasserstein GAN with Gradient Penalty:
 - Replaces BCE loss with Earth Mover's distance
 - Gradient penalty enforces 1-Lipschitz constraint on critic
 - No label smoothing needed; no sigmoid on critic output
+
+Masked L1 loss:
+- Computes L1 only in the hole (missing) region
+- Prevents known-region pixels from diluting the loss
 """
 
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
+
+
+def masked_l1_loss(predicted: torch.Tensor, target: torch.Tensor,
+                   mask: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Compute L1 loss only in the hole (missing) region.
+
+    Args:
+        predicted: generator output [B, C, H, W] in [-1, 1]
+        target: ground truth image [B, C, H, W] in [-1, 1]
+        mask: binary mask [B, 1, H, W], 1=known, 0=missing (hole)
+        eps: small value to avoid division by zero
+
+    Returns:
+        scalar L1 loss averaged over hole pixels only
+    """
+    hole = 1.0 - mask  # 1=missing, 0=known
+    loss = torch.abs(predicted - target) * hole
+    return loss.sum() / (hole.sum() * target.size(1) + eps)
 
 
 def compute_gradient_penalty(
@@ -86,28 +108,30 @@ def critic_loss(
 
 
 def generator_loss_wgan(
-    completed: torch.Tensor,
+    predicted: torch.Tensor,
     original: torch.Tensor,
+    mask: torch.Tensor,
     d_fake: torch.Tensor,
     lambda_l1: float,
 ) -> torch.Tensor:
-    """WGAN generator loss: minimize -D(G(z)) + lambda_l1 * L1.
+    """WGAN generator loss: minimize -D(G(z)) + lambda_l1 * masked_L1.
 
-    G_loss = -mean(D(fake)) + lambda_l1 * L1(completed, original)
+    G_loss = -mean(D(fake)) + lambda_l1 * masked_l1_loss(predicted, original, mask)
 
-    The generator tries to push critic scores of fake images as high
-    as possible, while also minimizing pixel-level L1 reconstruction.
+    L1 loss is computed only in the hole region (where mask == 0). This
+    prevents known-region pixels from dominating the reconstruction loss.
 
     Args:
-        completed: completed (inpainted) image [B, C, H, W]
+        predicted: raw generator output [B, C, H, W] (before blending)
         original: original ground truth image [B, C, H, W]
-        d_fake: critic output for completed image
+        mask: binary mask [B, 1, H, W], 1=known, 0=missing
+        d_fake: critic output for completed image (with mask channel)
         lambda_l1: weight for L1 reconstruction loss
 
     Returns:
         total generator loss (scalar)
     """
-    l1_loss = nn.functional.l1_loss(completed, original)
+    l1_loss = masked_l1_loss(predicted, original, mask)
     # WGAN generator: negative of critic score on fake
     wasserstein_loss = -d_fake.mean()
     return lambda_l1 * l1_loss + wasserstein_loss

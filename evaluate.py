@@ -29,7 +29,7 @@ def parse_args():
         description="Evaluate a trained inpainting model"
     )
     parser.add_argument("--dataset", type=str, required=True,
-                        choices=["fashion_mnist", "cifar10", "places2"])
+                        choices=["celeba", "fashion_mnist", "cifar10", "places2"])
     parser.add_argument("--mode", type=str, required=True,
                         choices=["l1", "gan"])
     parser.add_argument("--checkpoint", type=str, required=True,
@@ -55,11 +55,11 @@ def main():
 
     # Default image size
     if args.image_size is None:
-        args.image_size = 128 if args.dataset == "places2" else 32
+        args.image_size = 128 if args.dataset in ("celeba", "places2") else 32
 
     # Default mask size
     if args.mask_size is None:
-        default_masks = {32: 14, 64: 28, 128: 56}
+        default_masks = {32: 14, 64: 24, 128: 48}
         args.mask_size = default_masks.get(args.image_size, args.image_size // 2)
 
     # Image channels
@@ -86,7 +86,8 @@ def main():
     )
 
     # Evaluate
-    meters = {k: AverageMeter() for k in ["l1", "mse", "psnr"]}
+    metric_keys = ["full_l1", "full_mse", "full_psnr", "hole_l1", "hole_mse", "hole_psnr"]
+    meters = {k: AverageMeter() for k in metric_keys}
     all_originals = []
     all_completed = []
     all_masked = []
@@ -104,7 +105,7 @@ def main():
             predicted = generator(masked, mask)
             completed = masked * mask + predicted * (1 - mask)
 
-            metrics = compute_metrics(completed, images)
+            metrics = compute_metrics(completed, images, mask=mask)
             for k, v in metrics.items():
                 meters[k].update(v, batch_size)
 
@@ -116,13 +117,15 @@ def main():
                 n_saved += 1
 
     # Print results
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print(f"Evaluation Results — {args.dataset} ({args.mode}, {args.mask_type})")
-    print("-" * 50)
+    print("-" * 60)
     for k, meter in meters.items():
-        print(f"  {k.upper():>6s}: {meter.avg:.6f}" if k != "psnr"
-              else f"  {k.upper():>6s}: {meter.avg:.2f} dB")
-    print("=" * 50)
+        if "psnr" in k:
+            print(f"  {k:>12s}: {meter.avg:.2f} dB")
+        else:
+            print(f"  {k:>12s}: {meter.avg:.6f}")
+    print("=" * 60)
 
     # Save samples
     eval_dir = os.path.join(args.output_dir, args.dataset, args.mode, args.mask_type)

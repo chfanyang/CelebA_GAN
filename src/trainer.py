@@ -4,7 +4,6 @@ import csv
 import os
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
@@ -14,6 +13,7 @@ from .losses import (
     critic_loss,
     generator_loss_wgan,
     wasserstein_distance,
+    masked_l1_loss,
 )
 from .metrics import compute_metrics, AverageMeter
 from .visualize import save_sample_grid, plot_loss_curve
@@ -21,7 +21,8 @@ from .utils import denormalize, ensure_dir
 
 
 # Default mask sizes for different image dimensions
-DEFAULT_MASK_SIZES = {32: 14, 64: 28, 128: 56}
+# CelebA recommended: 128→48, 64→24
+DEFAULT_MASK_SIZES = {32: 14, 64: 24, 128: 48}
 
 
 def _get_inpainted(masked_image: torch.Tensor, mask: torch.Tensor,
@@ -122,9 +123,9 @@ class BaseTrainer:
         self.generator.train()
 
     def _validate(self):
-        """Compute validation metrics on a batch."""
+        """Compute validation metrics on a batch (full-image and hole-only)."""
         self.generator.eval()
-        total_metrics = {"l1": 0.0, "mse": 0.0, "psnr": 0.0}
+        total_metrics = {}
         n_batches = 0
 
         with torch.no_grad():
@@ -138,9 +139,11 @@ class BaseTrainer:
                 masked = images * mask
                 predicted = self.generator(masked, mask)
                 completed = _get_inpainted(masked, mask, predicted)
-                metrics = compute_metrics(completed, images)
-                for k in total_metrics:
-                    total_metrics[k] += metrics[k] * batch_size
+                metrics = compute_metrics(completed, images, mask=mask)
+                for k, v in metrics.items():
+                    if k not in total_metrics:
+                        total_metrics[k] = 0.0
+                    total_metrics[k] += v * batch_size
                 n_batches += 1
                 if n_batches >= 10:  # Limit validation to 10 batches
                     break
@@ -170,7 +173,11 @@ class BaseTrainer:
 
 
 class L1Trainer(BaseTrainer):
-    """Trainer for L1-only autoencoder inpainting."""
+    """Trainer for L1-only autoencoder inpainting.
+
+    Loss is computed only in the hole region (mask == 0) to prevent
+    known-region pixels from diluting the training signal.
+    """
 
     def __init__(self, generator, dataloader, val_dataloader,
                  output_dir, device, image_size, mask_type, mask_size,
@@ -181,7 +188,6 @@ class L1Trainer(BaseTrainer):
         self.optimizer = optim.Adam(
             self.generator.parameters(), lr=lr, betas=(0.9, 0.999)
         )
-        self.criterion = nn.L1Loss()
 
     def train(self, epochs: int):
         """Run L1 training loop."""
@@ -205,7 +211,9 @@ class L1Trainer(BaseTrainer):
                 # Forward
                 predicted = self.generator(masked, mask)
                 completed = _get_inpainted(masked, mask, predicted)
-                loss = self.criterion(completed, images)
+
+                # Masked L1 loss: only penalize the hole region
+                loss = masked_l1_loss(predicted, images, mask)
 
                 # Backward
                 self.optimizer.zero_grad()
@@ -221,7 +229,7 @@ class L1Trainer(BaseTrainer):
 
             tqdm.write(
                 f"Epoch {epoch}/{epochs} | L1 Loss: {loss_meter.avg:.4f} | "
-                f"PSNR: {val_metrics['psnr']:.2f} dB"
+                f"Hole PSNR: {val_metrics.get('hole_psnr', val_metrics.get('full_psnr', 0)):.2f} dB"
             )
 
             if epoch % self.save_interval == 0:
@@ -286,7 +294,7 @@ class GANTrainer(BaseTrainer):
         }, d_path)
 
     def train(self, epochs: int):
-        """Run WGAN-GP training loop with TTUR."""
+        """Run WGAN-GP training loop with TTUR and mask-conditioned critic."""
         self.generator.train()
         self.discriminator.train()
 
@@ -309,6 +317,9 @@ class GANTrainer(BaseTrainer):
                 )
                 masked = images * mask
 
+                # Prepare mask-conditioned real input for critic
+                real_input = torch.cat([images, mask], dim=1)
+
                 # ============================================================
                 # Critic (Discriminator) updates — n_critic times per G update
                 # ============================================================
@@ -317,13 +328,14 @@ class GANTrainer(BaseTrainer):
                     with torch.no_grad():
                         predicted = self.generator(masked, mask)
                         completed = _get_inpainted(masked, mask, predicted)
+                        fake_input = torch.cat([completed, mask], dim=1)
 
-                    d_real = self.discriminator(images)
-                    d_fake = self.discriminator(completed.detach())
+                    d_real = self.discriminator(real_input)
+                    d_fake = self.discriminator(fake_input.detach())
 
-                    # Gradient penalty
+                    # Gradient penalty on mask-conditioned inputs
                     gp = compute_gradient_penalty(
-                        self.discriminator, images, completed.detach(),
+                        self.discriminator, real_input, fake_input.detach(),
                         self.device, self.lambda_gp
                     )
 
@@ -344,21 +356,22 @@ class GANTrainer(BaseTrainer):
                 predicted = self.generator(masked, mask)
                 completed = _get_inpainted(masked, mask, predicted)
 
-                d_fake_for_g = self.discriminator(completed)
+                # Mask-conditioned fake input for critic
+                fake_input_for_g = torch.cat([completed, mask], dim=1)
+                d_fake_for_g = self.discriminator(fake_input_for_g)
+
+                # Generator loss: adversarial + masked L1
                 g_loss = generator_loss_wgan(
-                    completed, images, d_fake_for_g, self.lambda_l1
+                    predicted, images, mask, d_fake_for_g, self.lambda_l1
                 )
-                l1_val = nn.functional.l1_loss(completed, images).item()
+                l1_val = masked_l1_loss(predicted, images, mask).item()
 
                 self.g_optimizer.zero_grad()
                 g_loss.backward()
                 self.g_optimizer.step()
 
                 # Wasserstein distance for monitoring
-                w_dist = wasserstein_distance(
-                    self.discriminator(images),
-                    self.discriminator(completed.detach()),
-                )
+                w_dist = wasserstein_distance(d_real, d_fake.detach())
 
                 g_loss_meter.update(g_loss.item(), batch_size)
                 d_loss_meter.update(d_loss_avg, batch_size)
@@ -386,7 +399,7 @@ class GANTrainer(BaseTrainer):
                 f"Epoch {epoch}/{epochs} | G: {g_loss_meter.avg:.2f} | "
                 f"D: {d_loss_meter.avg:.2f} | L1: {l1_loss_meter.avg:.4f} | "
                 f"W-dist: {w_dist_meter.avg:.3f} | "
-                f"PSNR: {val_metrics['psnr']:.2f} dB"
+                f"Hole PSNR: {val_metrics.get('hole_psnr', val_metrics.get('full_psnr', 0)):.2f} dB"
             )
 
             if epoch % self.save_interval == 0:
