@@ -40,6 +40,8 @@ def parse_args():
     parser.add_argument("--mask_size", type=int, default=None)
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--output_dir", type=str, default="./outputs")
+    parser.add_argument("--output_path", type=str, default=None,
+                        help="Explicit output path (overrides auto-generated path)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
 
@@ -130,12 +132,15 @@ def main():
                 collected += 1
 
     # Create comparison figure
-    comparison_dir = os.path.join(args.output_dir, args.dataset)
-    ensure_dir(comparison_dir)
-
-    save_path = os.path.join(
-        comparison_dir, f"comparison_l1_vs_gan_{args.mask_type}.png"
-    )
+    if args.output_path:
+        save_path = args.output_path
+        ensure_dir(os.path.dirname(save_path) or ".")
+    else:
+        comparison_dir = os.path.join(args.output_dir, args.dataset)
+        ensure_dir(comparison_dir)
+        save_path = os.path.join(
+            comparison_dir, f"comparison_l1_vs_gan_{args.mask_type}.png"
+        )
     make_comparison_figure(
         torch.cat(all_originals, dim=0),
         torch.cat(all_masked, dim=0),

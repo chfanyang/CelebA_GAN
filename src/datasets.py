@@ -1,10 +1,8 @@
 """Dataset loading for CelebA, Fashion-MNIST, CIFAR-10, Places2 subset, and Kaggle CelebA."""
 
 import glob
-import os
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader, Subset
