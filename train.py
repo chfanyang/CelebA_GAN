@@ -4,19 +4,29 @@
 Main experiment: CelebA face image inpainting.
 
 Usage:
-    # CelebA L1 baseline (main experiment)
+    # Kaggle CelebA L1 baseline (local files, no annotation needed)
+    python train.py --dataset celeba_kaggle --mode l1 --mask_type center \\
+        --epochs 20 --batch_size 16 --image_size 128 \\
+        --data_root ./data/celeba --max_samples 20000
+
+    # Kaggle CelebA GAN
+    python train.py --dataset celeba_kaggle --mode gan --mask_type center \\
+        --epochs 40 --batch_size 16 --image_size 128 \\
+        --lambda_l1 100 --data_root ./data/celeba --max_samples 20000
+
+    # Kaggle CelebA GAN (lower memory: 64x64)
+    python train.py --dataset celeba_kaggle --mode gan --mask_type center \\
+        --epochs 40 --batch_size 32 --image_size 64 \\
+        --lambda_l1 100 --data_root ./data/celeba --max_samples 20000
+
+    # CelebA (torchvision) L1 baseline
     python train.py --dataset celeba --mode l1 --mask_type center \\
         --epochs 20 --batch_size 16 --image_size 128 \\
         --data_root ./data --max_samples 20000
 
-    # CelebA GAN (main experiment)
+    # CelebA (torchvision) GAN
     python train.py --dataset celeba --mode gan --mask_type center \\
         --epochs 40 --batch_size 16 --image_size 128 \\
-        --lambda_l1 100 --data_root ./data --max_samples 20000
-
-    # CelebA GAN (lower memory: 64x64)
-    python train.py --dataset celeba --mode gan --mask_type center \\
-        --epochs 40 --batch_size 32 --image_size 64 \\
         --lambda_l1 100 --data_root ./data --max_samples 20000
 
     # Fashion-MNIST L1 baseline
@@ -44,7 +54,7 @@ def parse_args():
     )
     # Dataset
     parser.add_argument("--dataset", type=str, required=True,
-                        choices=["celeba", "fashion_mnist", "cifar10", "places2"],
+                        choices=["celeba", "celeba_kaggle", "fashion_mnist", "cifar10", "places2"],
                         help="Dataset name")
     parser.add_argument("--data_root", type=str, default="./data",
                         help="Root directory for datasets")
@@ -96,14 +106,14 @@ def auto_defaults(args):
     """Set default values based on dataset and mode where not specified."""
     # Image size defaults
     if args.image_size is None:
-        if args.dataset in ("celeba", "places2"):
+        if args.dataset in ("celeba", "celeba_kaggle", "places2"):
             args.image_size = 128
         else:
             args.image_size = 32
 
     # Batch size defaults
     if args.batch_size is None:
-        if args.dataset == "celeba":
+        if args.dataset in ("celeba", "celeba_kaggle"):
             args.batch_size = 16 if args.image_size >= 128 else 32
         elif args.dataset == "places2":
             args.batch_size = 16 if args.image_size >= 128 else 32
@@ -115,6 +125,8 @@ def auto_defaults(args):
         defaults = {
             ("celeba", "l1"): 20,
             ("celeba", "gan"): 40,
+            ("celeba_kaggle", "l1"): 20,
+            ("celeba_kaggle", "gan"): 40,
             ("fashion_mnist", "l1"): 20,
             ("fashion_mnist", "gan"): 30,
             ("cifar10", "l1"): 30,

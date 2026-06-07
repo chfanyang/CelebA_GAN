@@ -29,7 +29,7 @@ def parse_args():
         description="Evaluate a trained inpainting model"
     )
     parser.add_argument("--dataset", type=str, required=True,
-                        choices=["celeba", "fashion_mnist", "cifar10", "places2"])
+                        choices=["celeba", "celeba_kaggle", "fashion_mnist", "cifar10", "places2"])
     parser.add_argument("--mode", type=str, required=True,
                         choices=["l1", "gan"])
     parser.add_argument("--checkpoint", type=str, required=True,
@@ -55,7 +55,7 @@ def main():
 
     # Default image size
     if args.image_size is None:
-        args.image_size = 128 if args.dataset in ("celeba", "places2") else 32
+        args.image_size = 128 if args.dataset in ("celeba", "celeba_kaggle", "places2") else 32
 
     # Default mask size
     if args.mask_size is None:

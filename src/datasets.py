@@ -1,4 +1,4 @@
-"""Dataset loading for CelebA, Fashion-MNIST, CIFAR-10, and Places2 subset."""
+"""Dataset loading for CelebA, Fashion-MNIST, CIFAR-10, Places2 subset, and Kaggle CelebA."""
 
 import glob
 import os
@@ -10,6 +10,87 @@ import torch
 from torch.utils.data import Dataset, DataLoader, Subset
 import torchvision.datasets as tv_datasets
 import torchvision.transforms as transforms
+
+
+class RecursiveImageDataset(Dataset):
+    """Recursively read all images from a directory.
+
+    Supports .jpg, .jpeg, .png, .webp (case-insensitive).
+    Ignores .csv, .txt, .json, and other non-image files.
+    Does NOT require any annotation/partition/attribute files.
+
+    Preprocessing: CenterCrop to square → Resize → ToTensor → Normalize to [-1, 1].
+
+    Args:
+        root: root directory to search for images recursively
+        image_size: target image size
+        max_samples: if set, limit to this many samples
+    """
+
+    _EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+    def __init__(self, root: str, image_size: int = 128,
+                 max_samples: int = None):
+        self.root = Path(root)
+        self.image_size = image_size
+
+        if not self.root.exists():
+            raise FileNotFoundError(
+                f"Data root does not exist: {self.root.resolve()}\n"
+                f"Please make sure --data_root points to a valid directory."
+            )
+
+        # Recursively find all image files
+        self.image_paths = []
+        for path in self.root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in self._EXTENSIONS:
+                self.image_paths.append(str(path))
+
+        if len(self.image_paths) == 0:
+            raise RuntimeError(
+                f"No images found in {self.root.resolve()}.\n"
+                f"Supported extensions: {', '.join(sorted(self._EXTENSIONS))}\n"
+                f"Please place image files directly under this directory "
+                f"(nested subdirectories are OK)."
+            )
+
+        # Sort for deterministic ordering
+        self.image_paths.sort()
+
+        # Limit samples if specified
+        if max_samples is not None and max_samples > 0:
+            self.image_paths = self.image_paths[:max_samples]
+
+        self.transform = transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                                 std=[0.5, 0.5, 0.5]),
+        ])
+
+        print(f"[INFO] RecursiveImageDataset: {len(self.image_paths)} images "
+              f"from {self.root.resolve()}")
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        try:
+            image = Image.open(img_path).convert("RGB")
+        except Exception:
+            # Return a fallback image on error
+            new_idx = torch.randint(0, len(self), (1,)).item()
+            return self.__getitem__(new_idx)
+
+        # Center-crop to square before resize
+        w, h = image.size
+        s = min(w, h)
+        left = (w - s) // 2
+        top = (h - s) // 2
+        image = image.crop((left, top, left + s, top + s))
+
+        return self.transform(image), 0
 
 
 class Places2Dataset(Dataset):
@@ -163,7 +244,7 @@ def get_dataloader(name: str, root: str, image_size: int,
     """Factory function to get a DataLoader for a dataset.
 
     Args:
-        name: "celeba", "fashion_mnist", "cifar10", or "places2"
+        name: "celeba", "celeba_kaggle", "fashion_mnist", "cifar10", or "places2"
         root: data root directory
         image_size: target image size
         batch_size: batch size
@@ -176,6 +257,18 @@ def get_dataloader(name: str, root: str, image_size: int,
     """
     if name == "celeba":
         dataset = get_celeba(root, image_size, train, max_samples)
+    elif name == "celeba_kaggle":
+        dataset = RecursiveImageDataset(
+            root=root, image_size=image_size, max_samples=max_samples
+        )
+        # Split train/val: first 90% for train, last 10% for val/test
+        total = len(dataset)
+        n_train = int(total * 0.9)
+        if train:
+            indices = list(range(0, n_train))
+        else:
+            indices = list(range(n_train, total))
+        dataset = torch.utils.data.Subset(dataset, indices)
     elif name == "fashion_mnist":
         dataset = get_fashion_mnist(root, image_size, train)
     elif name == "cifar10":
@@ -196,7 +289,8 @@ def get_dataloader(name: str, root: str, image_size: int,
             dataset = torch.utils.data.Subset(dataset, indices)
     else:
         raise ValueError(f"Unknown dataset: {name}. "
-                         f"Expected 'celeba', 'fashion_mnist', 'cifar10', or 'places2'.")
+                         f"Expected 'celeba', 'celeba_kaggle', 'fashion_mnist', "
+                         f"'cifar10', or 'places2'.")
 
     shuffle = train
     dataloader = DataLoader(

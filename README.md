@@ -45,7 +45,7 @@ pip install -r requirements.txt
 
 ## 数据集
 
-### CelebA（主实验）
+### CelebA（torchvision）
 
 CelebA 数据集通过 `torchvision.datasets.CelebA` 自动下载。
 
@@ -59,6 +59,106 @@ CelebA 数据集通过 `torchvision.datasets.CelebA` 自动下载。
 - CenterCrop 成正方形（原始图像 178×218）
 - Resize 到 `--image_size`（默认 128）
 - Normalize 到 [-1, 1]
+
+### Kaggle CelebA（推荐，仅需图片文件）
+
+如果你使用的是 Kaggle 下载并手动解压的 CelebA 数据，使用 `--dataset celeba_kaggle`。
+**不需要**属性标签、身份标签、landmark、partition 等标注文件，只需要 `.jpg` 图片文件。
+
+#### 准备数据
+
+```bash
+cd /mnt/hwdata/cfy/homework/CelebA_GAN
+mkdir -p data/celeba
+unzip archive.zip -d data/celeba
+```
+
+验证数据已就绪：
+
+```bash
+find data/celeba -type f -name "*.jpg" | head
+```
+
+如果能看到类似以下路径，说明数据准备完成：
+
+```
+data/celeba/img_align_celeba/img_align_celeba/000001.jpg
+data/celeba/img_align_celeba/img_align_celeba/000002.jpg
+...
+```
+
+#### 特点
+
+- 递归扫描 `--data_root` 下所有 `.jpg/.jpeg/.png/.webp` 图片
+- 不读取 `.csv`、`.txt`、`.json` 等标注文件
+- 不依赖 `torchvision.datasets.CelebA`
+- 不自动下载，不使用 Kaggle API
+- 自动 CenterCrop 成正方形后 Resize 到目标尺寸
+- Train/Val 自动按 90%/10% 划分
+
+#### 推荐训练命令
+
+**L1 baseline**
+
+```bash
+python train.py \
+  --dataset celeba_kaggle \
+  --mode l1 \
+  --mask_type center \
+  --epochs 20 \
+  --batch_size 16 \
+  --image_size 128 \
+  --data_root ./data/celeba \
+  --max_samples 20000 \
+  --output_dir ./outputs
+```
+
+**L1 + GAN**
+
+```bash
+python train.py \
+  --dataset celeba_kaggle \
+  --mode gan \
+  --mask_type center \
+  --epochs 40 \
+  --batch_size 16 \
+  --image_size 128 \
+  --data_root ./data/celeba \
+  --max_samples 20000 \
+  --lambda_l1 100 \
+  --output_dir ./outputs
+```
+
+**显存不足版本（64×64）**
+
+```bash
+python train.py \
+  --dataset celeba_kaggle \
+  --mode gan \
+  --mask_type center \
+  --epochs 40 \
+  --batch_size 32 \
+  --image_size 64 \
+  --data_root ./data/celeba \
+  --max_samples 20000 \
+  --lambda_l1 100 \
+  --output_dir ./outputs
+```
+
+#### 评估与对比
+
+```bash
+# 评估
+python evaluate.py --dataset celeba_kaggle --mode gan \
+  --checkpoint ./outputs/celeba_kaggle/gan/center/checkpoints/generator_final.pth \
+  --image_size 128 --data_root ./data/celeba
+
+# L1 vs GAN 对比图
+python make_comparison.py --dataset celeba_kaggle \
+  --l1_checkpoint ./outputs/celeba_kaggle/l1/center/checkpoints/generator_final.pth \
+  --gan_checkpoint ./outputs/celeba_kaggle/gan/center/checkpoints/generator_final.pth \
+  --image_size 128 --data_root ./data/celeba
+```
 
 ### 其他数据集
 
@@ -181,7 +281,7 @@ python make_comparison.py --dataset celeba \
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--dataset` | 数据集: celeba / fashion_mnist / cifar10 / places2 | 必填 |
+| `--dataset` | 数据集: celeba / celeba_kaggle / fashion_mnist / cifar10 / places2 | 必填 |
 | `--mode` | 训练模式: l1 / gan | 必填 |
 | `--mask_type` | 遮挡类型: center / random_box | center |
 | `--epochs` | 训练轮数 | 按数据集自动设置 |
