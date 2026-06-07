@@ -160,6 +160,84 @@ python make_comparison.py --dataset celeba_kaggle \
   --image_size 128 --data_root ./data/celeba
 ```
 
+#### Best Checkpoint
+
+训练过程中会自动保存验证集 hole_psnr 最优的模型：
+
+```text
+outputs/celeba_kaggle/{exp_name}/{mask_type}/checkpoints/generator_best.pth
+outputs/celeba_kaggle/{exp_name}/{mask_type}/checkpoints/discriminator_best.pth  (GAN only)
+```
+
+生成对比图时优先使用 best checkpoint：
+
+```bash
+python make_comparison.py --dataset celeba_kaggle \
+  --l1_checkpoint ./outputs/celeba_kaggle/l1/center/checkpoints/generator_best.pth \
+  --gan_checkpoint ./outputs/celeba_kaggle/gan/center/checkpoints/generator_best.pth \
+  --image_size 128 --data_root ./data/celeba
+```
+
+#### 自定义实验名
+
+通过 `--exp_name` 可将不同实验输出到不同目录，避免覆盖：
+
+```bash
+python train.py \
+  --dataset celeba_kaggle \
+  --mode gan \
+  --exp_name gan_lambda50 \
+  --mask_type center \
+  --epochs 40 \
+  --batch_size 16 \
+  --image_size 128 \
+  --data_root ./data/celeba \
+  --max_samples 20000 \
+  --lambda_l1 50 \
+  --output_dir ./outputs
+# 输出到: outputs/celeba_kaggle/gan_lambda50/center/
+```
+
+如果不指定 `--exp_name`，默认使用 mode 名（如 `l1` 或 `gan`），与旧版兼容。
+
+#### 可选调参实验：lambda_l1=50
+
+原实验 λ_l1=100，L1 约束较强，结果更接近像素重建。
+λ_l1=50 会增强 GAN 对抗项相对作用，可能带来更自然的视觉效果，但 PSNR 不一定提高。
+
+该实验是可选补充，不替代主实验。
+
+启动命令：
+
+```bash
+bash scripts/run_lambda50_experiment.sh
+```
+
+或手动：
+
+```bash
+# center mask
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset celeba_kaggle --mode gan --exp_name gan_lambda50 \
+  --mask_type center --epochs 40 --batch_size 16 --image_size 128 \
+  --data_root ./data/celeba --max_samples 20000 --lambda_l1 50 \
+  --output_dir ./outputs
+
+# random_box mask
+CUDA_VISIBLE_DEVICES=1 python train.py \
+  --dataset celeba_kaggle --mode gan --exp_name gan_lambda50 \
+  --mask_type random_box --epochs 40 --batch_size 16 --image_size 128 \
+  --data_root ./data/celeba --max_samples 20000 --lambda_l1 50 \
+  --output_dir ./outputs
+```
+
+输出目录：
+
+```text
+outputs/celeba_kaggle/gan_lambda50/center/
+outputs/celeba_kaggle/gan_lambda50/random_box/
+```
+
 ### 其他数据集
 
 Fashion-MNIST 和 CIFAR-10 自动下载。Places2 需要手动准备本地子集。

@@ -102,7 +102,7 @@ def plot_loss_curve(csv_path: str, save_path: str):
     # Keys that are metrics (not losses) — exclude from loss plot
     metric_keys = {"epoch", "full_l1", "full_mse", "full_psnr",
                    "hole_l1", "hole_mse", "hole_psnr",
-                   "l1", "mse", "psnr"}
+                   "l1", "mse", "psnr", "is_best", "best_epoch"}
     for key in rows[0].keys():
         if key not in metric_keys:
             vals = [float(r[key]) for r in rows]

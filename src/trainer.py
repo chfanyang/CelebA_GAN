@@ -65,6 +65,11 @@ class BaseTrainer:
         self.metrics_path = os.path.join(output_dir, "metrics.csv")
         self._init_metrics_csv()
 
+        # Best checkpoint tracking: prefer hole_psnr (higher is better)
+        self.best_psnr = -float("inf")
+        self.best_l1 = float("inf")
+        self.best_epoch = 0
+
         # Fixed images for consistent sample visualization
         self.fixed_images = None
         self.fixed_mask = None
@@ -80,6 +85,19 @@ class BaseTrainer:
         path = os.path.join(self.checkpoint_dir, f"generator_{suffix}.pth")
         torch.save({
             "epoch": epoch,
+            "model_state_dict": self.generator.state_dict(),
+        }, path)
+
+    def _save_best_checkpoint(self, epoch: int):
+        """Save best model checkpoint based on validation metric.
+
+        Subclasses may override to save additional models (e.g., discriminator).
+        """
+        path = os.path.join(self.checkpoint_dir, "generator_best.pth")
+        torch.save({
+            "epoch": epoch,
+            "best_psnr": self.best_psnr,
+            "best_l1": self.best_l1,
             "model_state_dict": self.generator.state_dict(),
         }, path)
 
@@ -156,10 +174,29 @@ class BaseTrainer:
         return total_metrics
 
     def _write_metrics_row(self, epoch: int, loss_dict: dict, val_metrics: dict):
-        """Write a row to the metrics CSV."""
+        """Write a row to the metrics CSV, marking best epoch."""
         row = {"epoch": epoch}
         row.update(loss_dict)
         row.update(val_metrics)
+
+        # Determine if this is the best epoch
+        is_best = False
+        if "hole_psnr" in val_metrics:
+            if val_metrics["hole_psnr"] > self.best_psnr:
+                self.best_psnr = val_metrics["hole_psnr"]
+                self.best_epoch = epoch
+                is_best = True
+        elif "hole_l1" in val_metrics:
+            if val_metrics["hole_l1"] < self.best_l1:
+                self.best_l1 = val_metrics["hole_l1"]
+                self.best_epoch = epoch
+                is_best = True
+
+        row["is_best"] = is_best
+        row["best_epoch"] = self.best_epoch
+
+        if is_best:
+            self._save_best_checkpoint(epoch)
 
         if not self._csv_header_written:
             with open(self.metrics_path, "w", newline="") as f:
@@ -290,6 +327,17 @@ class GANTrainer(BaseTrainer):
         }, g_path)
         torch.save({
             "epoch": epoch,
+            "model_state_dict": self.discriminator.state_dict(),
+        }, d_path)
+
+    def _save_best_checkpoint(self, epoch: int):
+        """Save best generator and discriminator checkpoints."""
+        super()._save_best_checkpoint(epoch)
+        d_path = os.path.join(self.checkpoint_dir, "discriminator_best.pth")
+        torch.save({
+            "epoch": epoch,
+            "best_psnr": self.best_psnr,
+            "best_l1": self.best_l1,
             "model_state_dict": self.discriminator.state_dict(),
         }, d_path)
 

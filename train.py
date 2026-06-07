@@ -88,6 +88,8 @@ def parse_args():
     # Output
     parser.add_argument("--output_dir", type=str, default="./outputs",
                         help="Output root directory")
+    parser.add_argument("--exp_name", type=str, default=None,
+                        help="Experiment name for output subdir (default: mode name, e.g. l1/gan)")
     parser.add_argument("--save_interval", type=int, default=5,
                         help="Save checkpoint every N epochs")
     parser.add_argument("--sample_interval", type=int, default=5,
@@ -143,16 +145,19 @@ def main():
     args = parse_args()
     args = auto_defaults(args)
 
+    # Experiment name: defaults to mode if not specified
+    exp_name = args.exp_name if args.exp_name else args.mode
+
     # Setup
     set_seed(args.seed)
     device = get_device()
     print(f"[INFO] Using device: {device}")
     print(f"[INFO] Dataset: {args.dataset}, Mode: {args.mode}, "
-          f"Image size: {args.image_size}, Epochs: {args.epochs}")
+          f"Exp: {exp_name}, Image size: {args.image_size}, Epochs: {args.epochs}")
 
     # Output directory (includes mask_type to separate experiments)
     output_dir = os.path.join(
-        args.output_dir, args.dataset, args.mode, args.mask_type
+        args.output_dir, args.dataset, exp_name, args.mask_type
     )
     ensure_dir(output_dir)
     print(f"[INFO] Output directory: {output_dir}")

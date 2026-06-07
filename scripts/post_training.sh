@@ -2,8 +2,8 @@
 #
 # post_training.sh
 #
-# Run after all 4 training experiments complete.
-# Generates comparison figures, metrics summaries, and experiment report.
+# Run after all training experiments complete.
+# Generates comparison figures (final + best), metrics summaries, and experiment report.
 #
 # Usage:
 #   bash scripts/post_training.sh
@@ -24,72 +24,107 @@ echo "Post-Training: Comparisons & Summaries"
 echo "============================================"
 
 # ---------------------------------------------------------------------------
-# 1. Check that all 4 checkpoints exist
+# Helper: generate a comparison figure
 # ---------------------------------------------------------------------------
-MISSING=""
-for exp in "l1/center" "gan/center" "l1/random_box" "gan/random_box"; do
-    ckpt="${BASE}/${exp}/checkpoints/generator_final.pth"
-    if [ ! -f "$ckpt" ]; then
-        echo "[MISSING] $ckpt"
-        MISSING="${MISSING} ${exp}"
+make_comparison() {
+    local mask="$1"
+    local l1_ckpt="$2"
+    local gan_ckpt="$3"
+    local out_path="$4"
+    local label="$5"
+
+    if [ -f "$l1_ckpt" ] && [ -f "$gan_ckpt" ]; then
+        echo "[RUN] ${label}..."
+        python make_comparison.py \
+            --dataset celeba_kaggle \
+            --mask_type "${mask}" \
+            --image_size ${IMAGE_SIZE} \
+            --data_root "${DATA_ROOT}" \
+            --l1_checkpoint "${l1_ckpt}" \
+            --gan_checkpoint "${gan_ckpt}" \
+            --output_path "${out_path}"
+        echo "[OK] ${out_path}"
     else
-        echo "[OK] $ckpt"
+        echo "[SKIP] ${label} — missing checkpoints"
     fi
-done
-
-if [ -n "$MISSING" ]; then
-    echo ""
-    echo "[WARN] Some checkpoints are missing:${MISSING}"
-    echo "       Proceeding with available checkpoints..."
-fi
+}
 
 # ---------------------------------------------------------------------------
-# 2. Generate comparison figures
+# 1. Final checkpoint comparisons (lambda_l1=100)
 # ---------------------------------------------------------------------------
 echo ""
-echo "--- Generating comparison figures ---"
+echo "--- Final checkpoint comparisons (lambda_l1=100) ---"
 
-if [ -f "${BASE}/l1/center/checkpoints/generator_final.pth" ] && \
-   [ -f "${BASE}/gan/center/checkpoints/generator_final.pth" ]; then
-    echo "[RUN] Center mask comparison..."
-    python make_comparison.py \
-        --dataset celeba_kaggle \
-        --mask_type center \
-        --image_size ${IMAGE_SIZE} \
-        --data_root "${DATA_ROOT}" \
-        --l1_checkpoint "${BASE}/l1/center/checkpoints/generator_final.pth" \
-        --gan_checkpoint "${BASE}/gan/center/checkpoints/generator_final.pth" \
-        --output_path "${BASE}/comparison_center.png"
-    echo "[OK] ${BASE}/comparison_center.png"
-else
-    echo "[SKIP] Center mask — missing checkpoints"
-fi
+make_comparison "center" \
+    "${BASE}/l1/center/checkpoints/generator_final.pth" \
+    "${BASE}/gan/center/checkpoints/generator_final.pth" \
+    "${BASE}/comparison_center.png" \
+    "Center mask (final)"
 
-if [ -f "${BASE}/l1/random_box/checkpoints/generator_final.pth" ] && \
-   [ -f "${BASE}/gan/random_box/checkpoints/generator_final.pth" ]; then
-    echo "[RUN] Random box comparison..."
-    python make_comparison.py \
-        --dataset celeba_kaggle \
-        --mask_type random_box \
-        --image_size ${IMAGE_SIZE} \
-        --data_root "${DATA_ROOT}" \
-        --l1_checkpoint "${BASE}/l1/random_box/checkpoints/generator_final.pth" \
-        --gan_checkpoint "${BASE}/gan/random_box/checkpoints/generator_final.pth" \
-        --output_path "${BASE}/comparison_random_box.png"
-    echo "[OK] ${BASE}/comparison_random_box.png"
+make_comparison "random_box" \
+    "${BASE}/l1/random_box/checkpoints/generator_final.pth" \
+    "${BASE}/gan/random_box/checkpoints/generator_final.pth" \
+    "${BASE}/comparison_random_box.png" \
+    "Random box mask (final)"
+
+# ---------------------------------------------------------------------------
+# 2. Best checkpoint comparisons (lambda_l1=100)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Best checkpoint comparisons (lambda_l1=100) ---"
+
+make_comparison "center" \
+    "${BASE}/l1/center/checkpoints/generator_best.pth" \
+    "${BASE}/gan/center/checkpoints/generator_best.pth" \
+    "${BASE}/comparison_center_best.png" \
+    "Center mask (best)"
+
+make_comparison "random_box" \
+    "${BASE}/l1/random_box/checkpoints/generator_best.pth" \
+    "${BASE}/gan/random_box/checkpoints/generator_best.pth" \
+    "${BASE}/comparison_random_box_best.png" \
+    "Random box mask (best)"
+
+# ---------------------------------------------------------------------------
+# 3. Lambda50 comparisons (if available)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Lambda50 comparisons (if available) ---"
+
+L50_BASE="${BASE}/gan_lambda50"
+
+if [ -d "${L50_BASE}" ]; then
+    make_comparison "center" \
+        "${BASE}/l1/center/checkpoints/generator_best.pth" \
+        "${L50_BASE}/center/checkpoints/generator_best.pth" \
+        "${BASE}/comparison_center_lambda50.png" \
+        "Center mask lambda50 (best)"
+
+    make_comparison "random_box" \
+        "${BASE}/l1/random_box/checkpoints/generator_best.pth" \
+        "${L50_BASE}/random_box/checkpoints/generator_best.pth" \
+        "${BASE}/comparison_random_box_lambda50.png" \
+        "Random box lambda50 (best)"
 else
-    echo "[SKIP] Random box — missing checkpoints"
+    echo "[SKIP] Lambda50 experiments not found at ${L50_BASE}"
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Generate metrics summary
+# 4. Generate metrics summary (standard)
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Generating metrics summary ---"
 python scripts/generate_summaries.py --output_dir "${OUTPUT_DIR}"
 
 # ---------------------------------------------------------------------------
-# 4. Generate experiment summary markdown
+# 5. Generate extended metrics summary with lambda50
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Generating extended summary (with lambda50) ---"
+python scripts/generate_summaries_extended.py --output_dir "${OUTPUT_DIR}"
+
+# ---------------------------------------------------------------------------
+# 6. Generate experiment summary markdown
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Generating experiment summary ---"
@@ -100,8 +135,12 @@ echo "============================================"
 echo "Post-training complete!"
 echo "Output files:"
 echo "  ${BASE}/comparison_center.png"
+echo "  ${BASE}/comparison_center_best.png"
 echo "  ${BASE}/comparison_random_box.png"
+echo "  ${BASE}/comparison_random_box_best.png"
 echo "  ${BASE}/final_metrics_summary.csv"
 echo "  ${BASE}/final_metrics_summary.md"
+echo "  ${BASE}/final_metrics_summary_with_lambda50.csv"
+echo "  ${BASE}/final_metrics_summary_with_lambda50.md"
 echo "  ${BASE}/experiment_summary.md"
 echo "============================================"

@@ -33,6 +33,31 @@ def read_final_metrics(metrics_path: str) -> dict:
     return rows[-1]  # Last epoch
 
 
+def read_all_rows(metrics_path: str) -> list:
+    """Read all rows from a metrics CSV file."""
+    if not os.path.exists(metrics_path):
+        return []
+    with open(metrics_path, "r") as f:
+        return list(csv.DictReader(f))
+
+
+def get_best_metrics(rows: list) -> dict:
+    """Find the best row by hole_psnr (higher is better) or hole_l1 (lower is better)."""
+    if not rows:
+        return {}
+    if "hole_psnr" in rows[0]:
+        best = max(rows, key=lambda r: float(r.get("hole_psnr", -1e9)))
+    elif "hole_l1" in rows[0]:
+        best = min(rows, key=lambda r: float(r.get("hole_l1", 1e9)))
+    else:
+        best = rows[-1]
+    return {
+        "best_epoch": best.get("epoch", "N/A"),
+        "best_hole_psnr": best.get("hole_psnr", "N/A"),
+        "best_hole_l1": best.get("hole_l1", "N/A"),
+    }
+
+
 def format_value(v: str) -> str:
     """Format a metric value to 4 decimal places if float."""
     try:
@@ -60,16 +85,22 @@ def main():
     found_any = False
 
     for dataset, mask_type, mode, csv_path in experiments:
-        metrics = read_final_metrics(str(csv_path))
-        if metrics is None:
+        all_rows_list = read_all_rows(str(csv_path))
+        if not all_rows_list:
             print(f"[WARN] Not found: {csv_path}")
             continue
+
+        metrics = all_rows_list[-1]  # last epoch for final values
+        best = get_best_metrics(all_rows_list)
 
         found_any = True
         row = {
             "dataset": dataset,
             "mask_type": mask_type,
             "mode": mode,
+            "best_epoch": best.get("best_epoch", "N/A"),
+            "best_hole_psnr": best.get("best_hole_psnr", "N/A"),
+            "best_hole_l1": best.get("best_hole_l1", "N/A"),
         }
 
         # Extract key metrics (handle naming variances)
